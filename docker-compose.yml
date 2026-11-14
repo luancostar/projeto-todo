@@ -1,0 +1,27 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      DB_PATH: /app/data/app.db
+      APP_USER: ${APP_USER:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:-admin123}
+      TOKEN_SECRET: ${TOKEN_SECRET:-troque-este-segredo-em-producao}
+    volumes:
+      - db-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/web/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Testes unitários + cobertura: docker compose run --rm test
+  test:
+    build: .
+    profiles: ["test"]
+    command: ["npx", "jest", "--coverage"]
+
+volumes:
+  db-data:
