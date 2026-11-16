@@ -495,10 +495,13 @@ export class WebController {
   }
 }
 
-/** Issue #7: endpoints exclusivos da CLI (`/api/cli/*`), separados dos endpoints da Web. */
+/** Issue #7 e #8: endpoints exclusivos da CLI (`/api/cli/*`), separados dos endpoints da Web. */
 @Controller('api/cli')
 export class CliController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    @Inject('DB') private readonly db: Db,
+  ) {}
 
   @Get('health')
   health(@Req() req: WebRequest): { status: string } {
@@ -518,7 +521,61 @@ export class CliController {
     apiLog(req.requestId, 'INFO', 'me', 'success', 'Sessão da CLI validada', 'cli');
     return { username: req.user as string };
   }
+
+  /** Issue #8: Cadastro de novo registro via CLI. */
+  @Post('records')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(CliAuthGuard)
+  createRecord(@Body() body: unknown, @Req() req: WebRequest): RecordRow {
+    const validation = validateRecordInput(body);
+
+    if (!validation.valid || !validation.data) {
+      apiLog(req.requestId, 'WARN', 'create_record', 'error', 'Falha de validação ao criar registro', 'cli');
+      throw new BadRequestException({ message: 'Dados inválidos', errors: validation.errors });
+    }
+
+    const record = this.db.createRecord(validation.data, req.requestId, 'cli');
+
+    apiLog(req.requestId, 'INFO', 'create_record', 'success', `Registro ${record.id} criado com sucesso`, 'cli');
+
+    return record;
+  }
+
+  /** Issue #8: Edição de registro existente via CLI. */
+  @Put('records/:id')
+  @UseGuards(CliAuthGuard)
+  updateRecord(
+    @Param('id') idParam: string,
+    @Body() body: unknown,
+    @Req() req: WebRequest,
+  ): RecordRow {
+    const id = Number(idParam);
+
+    if (isNaN(id) || id <= 0) {
+      apiLog(req.requestId, 'WARN', 'update_record', 'error', 'ID de registro inválido', 'cli');
+      throw new BadRequestException('ID de registro deve ser um número positivo');
+    }
+
+    const validation = validateRecordInput(body);
+
+    if (!validation.valid || !validation.data) {
+      apiLog(req.requestId, 'WARN', 'update_record', 'error', 'Falha de validação ao atualizar registro', 'cli');
+      throw new BadRequestException({ message: 'Dados inválidos', errors: validation.errors });
+    }
+
+    const updated = this.db.updateRecord(id, validation.data, req.requestId, 'cli');
+
+    if (!updated) {
+      apiLog(req.requestId, 'WARN', 'update_record', 'error', `Registro ${id} não encontrado`, 'cli');
+      throw new NotFoundException(`Registro ${id} não encontrado`);
+    }
+
+    apiLog(req.requestId, 'INFO', 'update_record', 'success', `Registro ${id} atualizado com sucesso`, 'cli');
+
+    return updated;
+  }
 }
+
 
 /** Entrega a página inicial (index.html). */
 @Controller()

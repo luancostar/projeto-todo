@@ -11,7 +11,7 @@ Projeto da avaliação prática de Git e GitHub. Lista de tarefas com Web (React
 | `index.html` | Toda a Web (HTML, CSS e React via CDN embutidos): login, cadastro/edição, tabela e busca avançada |
 | `api.ts` | API NestJS: endpoints, autenticação e logs da API |
 | `db.ts` | Acesso ao SQLite e logs da camada de banco |
-| `cli.ts` | CLI: fala só com a API (`/api/cli/*`), nunca com o banco (issue #7) |
+| `cli.ts` | CLI: fala só com a API (`/api/cli/*`), nunca com o banco (issues #7 e #8) |
 | `README.md` | Execução e documentação de cada issue |
 
 ---

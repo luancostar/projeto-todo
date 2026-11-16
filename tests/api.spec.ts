@@ -837,4 +837,140 @@ describe('CLI (issue #7): GET /api/cli/me', () => {
       .set('Authorization', `Bearer ${auth.sign('admin', 3600, 'cli')}`);
     expect(res.status).toBe(401);
   });
+
+
+describe('CLI (issue #8): POST /api/cli/records (Cadastro)', () => {
+  const cliToken = () => auth.sign('admin', 3600, 'cli');
+
+  it('rejeita requisições sem autenticação com HTTP 401', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/cli/records')
+      .send({ title: 'Teste' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('rejeita dados inválidos com HTTP 400 e registra log da CLI', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/cli/records')
+      .set('Authorization', `Bearer ${cliToken()}`)
+      .send({ title: 'a' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toBeDefined();
+
+    expect(logs().find((l) => l.layer === 'api' && l.operation === 'create_record'))
+      .toMatchObject({ level: 'WARN', status: 'error', client: 'cli' });
+  });
+
+  it('cria uma tarefa com HTTP 201 e correlaciona logs da API e do banco', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/cli/records')
+      .set('Authorization', `Bearer ${cliToken()}`)
+      .send({
+        title: 'Tarefa criada pela CLI',
+        description: 'Cadastro realizado pelo terminal',
+        category: 'Desenvolvimento',
+        priority: 'alta',
+        due_date: '2026-12-30',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBeDefined();
+    expect(res.body.title).toBe('Tarefa criada pela CLI');
+
+    const requestId = res.headers['x-request-id'];
+
+    expect(logs().find((l) => l.layer === 'api' && l.operation === 'create_record'))
+      .toMatchObject({ status: 'success', client: 'cli', request_id: requestId });
+
+    expect(logs().find((l) => l.layer === 'db' && l.operation === 'insert_record'))
+      .toMatchObject({ status: 'success', client: 'cli', request_id: requestId });
+  });
+});
+
+describe('CLI (issue #8): PUT /api/cli/records/:id (Edição)', () => {
+  const cliToken = () => auth.sign('admin', 3600, 'cli');
+  let createdId: number;
+
+  beforeEach(async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/cli/records')
+      .set('Authorization', `Bearer ${cliToken()}`)
+      .send({
+        title: 'Tarefa para editar via CLI',
+        description: 'Descrição inicial',
+        category: 'Trabalho',
+        priority: 'media',
+      });
+
+    createdId = res.body.id;
+  });
+
+  it('rejeita requisições sem autenticação com HTTP 401', async () => {
+    const res = await request(app.getHttpServer())
+      .put(`/api/cli/records/${createdId}`)
+      .send({});
+
+    expect(res.status).toBe(401);
+  });
+
+  it('rejeita ID inválido com HTTP 400', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/api/cli/records/abc')
+      .set('Authorization', `Bearer ${cliToken()}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejeita dados inválidos com HTTP 400', async () => {
+    const res = await request(app.getHttpServer())
+      .put(`/api/cli/records/${createdId}`)
+      .set('Authorization', `Bearer ${cliToken()}`)
+      .send({ title: '' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('retorna HTTP 404 para registro inexistente', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/api/cli/records/999999')
+      .set('Authorization', `Bearer ${cliToken()}`)
+      .send({
+        title: 'Título válido',
+        description: 'Descrição válida',
+        category: 'Trabalho',
+        priority: 'baixa',
+      });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('atualiza a tarefa com HTTP 200 e correlaciona os logs', async () => {
+    const res = await request(app.getHttpServer())
+      .put(`/api/cli/records/${createdId}`)
+      .set('Authorization', `Bearer ${cliToken()}`)
+      .send({
+        title: 'Tarefa editada pela CLI',
+        description: 'Descrição atualizada pelo terminal',
+        category: 'Estudo',
+        priority: 'alta',
+        due_date: '2026-12-25',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(createdId);
+    expect(res.body.title).toBe('Tarefa editada pela CLI');
+
+    const requestId = res.headers['x-request-id'];
+
+    expect(logs().find((l) => l.layer === 'api' && l.operation === 'update_record'))
+      .toMatchObject({ status: 'success', client: 'cli', request_id: requestId });
+
+    expect(logs().find((l) => l.layer === 'db' && l.operation === 'update_record'))
+      .toMatchObject({ status: 'success', client: 'cli', request_id: requestId });
+  });
+});
+
 });

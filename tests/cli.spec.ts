@@ -186,4 +186,129 @@ describe('run: padrões', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     jest.restoreAllMocks();
   });
+
+describe('run: create (cadastro de tarefa)', () => {
+  const args = [
+    'create',
+    '--title', 'Minha tarefa',
+    '--description', 'Descrição da tarefa',
+    '--category', 'Trabalho',
+    '--priority', 'alta',
+  ];
+
+  it('cadastra uma tarefa e envia os dados para a API com Bearer token', async () => {
+    const c = capture();
+    const fetchFn = jest.fn().mockResolvedValue(reply(201, { id: 10, title: 'Minha tarefa' }));
+
+    expect(await run([...args, '--due-date', '2026-12-30'], { TODO_TOKEN: 'token-teste' }, c.io, fetchFn)).toBe(0);
+
+    expect(fetchFn.mock.calls[0][0]).toBe('http://localhost:3000/api/cli/records');
+    expect(fetchFn.mock.calls[0][1].method).toBe('POST');
+    expect(fetchFn.mock.calls[0][1].headers.Authorization).toBe('Bearer token-teste');
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body)).toEqual({
+      title: 'Minha tarefa',
+      description: 'Descrição da tarefa',
+      category: 'Trabalho',
+      priority: 'alta',
+      due_date: '2026-12-30',
+    });
+    expect(c.out).toEqual(['{"id":10,"title":"Minha tarefa"}']);
+  });
+
+  it('aceita token pela opção --token e permite cadastro sem data', async () => {
+    const fetchFn = jest.fn().mockResolvedValue(reply(201, { id: 11 }));
+    const c = capture();
+
+    expect(await run([...args, '--token', 'token-manual'], {}, c.io, fetchFn)).toBe(0);
+    expect(fetchFn.mock.calls[0][1].headers.Authorization).toBe('Bearer token-manual');
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body)).not.toHaveProperty('due_date');
+  });
+
+  it('retorna 2 quando não informa token', async () => {
+    const c = capture();
+    const fetchFn = jest.fn();
+
+    expect(await run(args, {}, c.io, fetchFn)).toBe(2);
+    expect(c.err[0]).toContain('TODO_TOKEN');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('retorna 2 quando faltam campos obrigatórios', async () => {
+    const c = capture();
+    const fetchFn = jest.fn();
+
+    expect(await run(['create', '--token', 'abc', '--title', 'Teste'], {}, c.io, fetchFn)).toBe(2);
+    expect(c.err[0]).toContain('--description');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('retorna 1 quando a API rejeita o cadastro', async () => {
+    const c = capture();
+    const fetchFn = jest.fn().mockResolvedValue(reply(400, { message: 'Dados inválidos' }));
+
+    expect(await run([...args, '--token', 'abc'], {}, c.io, fetchFn)).toBe(1);
+    expect(c.err).toEqual(['Erro HTTP 400 - Dados inválidos']);
+  });
+});
+
+describe('run: update (edição de tarefa)', () => {
+  const args = [
+    'update',
+    '--id', '10',
+    '--title', 'Tarefa atualizada',
+    '--description', 'Descrição atualizada',
+    '--category', 'Estudo',
+    '--priority', 'media',
+  ];
+
+  it('atualiza uma tarefa e envia PUT para a API', async () => {
+    const c = capture();
+    const fetchFn = jest.fn().mockResolvedValue(reply(200, { id: 10, title: 'Tarefa atualizada' }));
+
+    expect(await run([...args, '--due-date', '2026-12-25'], { TODO_TOKEN: 'token-teste' }, c.io, fetchFn)).toBe(0);
+
+    expect(fetchFn.mock.calls[0][0]).toBe('http://localhost:3000/api/cli/records/10');
+    expect(fetchFn.mock.calls[0][1].method).toBe('PUT');
+    expect(fetchFn.mock.calls[0][1].headers.Authorization).toBe('Bearer token-teste');
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body)).toEqual({
+      title: 'Tarefa atualizada',
+      description: 'Descrição atualizada',
+      category: 'Estudo',
+      priority: 'media',
+      due_date: '2026-12-25',
+    });
+    expect(c.out).toEqual(['{"id":10,"title":"Tarefa atualizada"}']);
+  });
+
+  it('retorna 2 quando o ID não é informado ou é inválido', async () => {
+    const c = capture();
+    const fetchFn = jest.fn();
+
+    expect(await run([
+      'update',
+      '--token', 'abc',
+      '--title', 'Teste',
+      '--description', 'Descrição',
+      '--category', 'Trabalho',
+      '--priority', 'baixa',
+    ], {}, c.io, fetchFn)).toBe(2);
+
+    expect(c.err[0]).toContain('--id');
+    expect(fetchFn).not.toHaveBeenCalled();
+
+    c.err.length = 0;
+
+    expect(await run([...args.slice(0, 1), '--id', 'abc', ...args.slice(3), '--token', 'abc'], {}, c.io, fetchFn)).toBe(2);
+    expect(c.err[0]).toContain('ID válido');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('retorna 1 quando a API rejeita a edição', async () => {
+    const c = capture();
+    const fetchFn = jest.fn().mockResolvedValue(reply(404, { message: 'Registro não encontrado' }));
+
+    expect(await run([...args, '--token', 'abc'], {}, c.io, fetchFn)).toBe(1);
+    expect(c.err).toEqual(['Erro HTTP 404 - Registro não encontrado']);
+  });
+});
 });
