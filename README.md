@@ -492,6 +492,67 @@ Filtros inválidos geram `WARN` na camada `api` com HTTP 400. Tokens e senhas nu
 
 ---
 
+---
+
+## Issue #10: Busca Avançada pela CLI
+
+Implementação do comando `search` para realizar buscas avançadas de tarefas pela CLI, utilizando o endpoint próprio `/api/cli/records/search`. Os filtros podem ser combinados e seguem as mesmas regras da busca avançada Web (Issue #4).
+
+### Como usar
+
+Todos os comandos exigem um token Bearer da CLI, informado por `--token` ou pela variável `TODO_TOKEN`.
+
+```bash
+# Busca por texto no título ou descrição
+docker compose run --rm cli search --q relatorio
+
+# Combina texto, categoria e prioridade
+docker compose run --rm cli search --q relatorio --category Estudo --priority alta
+
+# Busca por intervalo de prazo
+docker compose run --rm cli search --due-from 2026-12-01 --due-to 2026-12-31
+
+# Combina filtros com paginação e ordenação
+docker compose run --rm cli search --category Trabalho --page 2 --limit 10 --sort title --order asc
+
+# Informa o token diretamente
+docker compose run --rm cli search --q relatorio --token SEU_TOKEN
+```
+
+### Filtros e opções
+
+| Opção CLI | Parâmetro da API | Descrição |
+|---|---|---|
+| `--q <texto>` | `q` | Procura no título ou na descrição |
+| `--category <categoria>` | `category` | Filtra por categoria exata |
+| `--priority <prioridade>` | `priority` | Filtra por `baixa`, `media` ou `alta` |
+| `--due-from <data>` | `due_from` | Prazo inicial (`YYYY-MM-DD`) |
+| `--due-to <data>` | `due_to` | Prazo final (`YYYY-MM-DD`) |
+| `--page <n>` | `page` | Página dos resultados (padrão 1) |
+| `--limit <n>` | `limit` | Resultados por página, de 1 a 100 (padrão 5) |
+| `--sort <campo>` | `sort` | Ordenação por `id`, `title`, `category`, `priority`, `due_date` ou `created_at` |
+| `--order <asc\|desc>` | `order` | Direção da ordenação (padrão `desc`) |
+
+Os filtros são combinados por lógica **E**. Opções vazias equivalem a filtros ausentes. A busca retorna os resultados paginados e ordenados no mesmo formato da listagem.
+
+### Endpoint da Issue #10
+
+| Método | Rota | Autenticação | Resposta |
+|---|---|---|---|
+| GET | `/api/cli/records/search` | Bearer token da CLI | 200 `{ items, total, page, limit, totalPages }`; 400 com a lista `errors` se algum filtro for inválido; 401 sem token válido |
+
+A implementação reutiliza `Db.searchRecords`, compartilhando a lógica de consulta com a busca Web, mas registra a origem como `client: "cli"`. A CLI continua acessando exclusivamente a API REST, sem conexão direta com o banco.
+
+### Logs da busca
+
+Cada busca gera logs na camada `api` e, quando consulta o banco, na camada `db`, com `client: "cli"` e o mesmo `request_id`.
+
+```bash
+docker compose logs --no-log-prefix app | grep '"operation":"search_records"' | grep '"client":"cli"'
+```
+
+Filtros inválidos geram `WARN` na camada `api` e retornam HTTP 400. Tokens nunca são registrados nos logs.
+
 ## Logs e Correlação
 
 Cada operação gera **uma linha JSON por evento** no stdout, uma na camada `api` e outra na camada `db` (quando acessa o banco), com o **mesmo `request_id`**:

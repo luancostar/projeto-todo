@@ -313,6 +313,88 @@ describe('run: update (edição de tarefa)', () => {
 });
 });
 
+
+describe('run: search (busca avançada)', () => {
+  const page = (items: unknown[]) =>
+    reply(200, { items, total: items.length, page: 1, limit: 5, totalPages: 1 });
+
+  it('chama o endpoint de busca sem filtros', async () => {
+    const c = capture();
+    const fetchFn = jest.fn().mockResolvedValue(page([]));
+
+    expect(await run(['search', '--token', 'abc'], {}, c.io, fetchFn)).toBe(0);
+
+    expect(fetchFn.mock.calls[0][0]).toBe('http://localhost:3000/api/cli/records/search');
+    expect(fetchFn.mock.calls[0][1].method).toBe('GET');
+    expect(fetchFn.mock.calls[0][1].headers.Authorization).toBe('Bearer abc');
+    expect(c.out[0]).toContain('Nenhuma tarefa encontrada.');
+  });
+
+  it('envia todos os filtros, paginação e ordenação com os nomes esperados pela API', async () => {
+    const fetchFn = jest.fn().mockResolvedValue(page([]));
+
+    await run([
+      'search',
+      '--q', 'relatório',
+      '--category', 'Trabalho',
+      '--priority', 'alta',
+      '--due-from', '2026-12-01',
+      '--due-to', '2026-12-31',
+      '--page', '2',
+      '--limit', '10',
+      '--sort', 'title',
+      '--order', 'asc',
+      '--token', 'abc',
+    ], {}, capture().io, fetchFn);
+
+    const url = new URL(fetchFn.mock.calls[0][0]);
+
+    expect(url.pathname).toBe('/api/cli/records/search');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      q: 'relatório',
+      category: 'Trabalho',
+      priority: 'alta',
+      due_from: '2026-12-01',
+      due_to: '2026-12-31',
+      page: '2',
+      limit: '10',
+      sort: 'title',
+      order: 'asc',
+    });
+    expect(fetchFn.mock.calls[0][1].headers.Authorization).toBe('Bearer abc');
+  });
+
+  it('usa o token da variável TODO_TOKEN', async () => {
+    const fetchFn = jest.fn().mockResolvedValue(page([]));
+
+    await run(['search'], { TODO_TOKEN: 'token-env' }, capture().io, fetchFn);
+
+    expect(fetchFn.mock.calls[0][1].headers.Authorization).toBe('Bearer token-env');
+  });
+
+  it('retorna 1 quando a API rejeita a busca', async () => {
+    const c = capture();
+    const fetchFn = jest.fn().mockResolvedValue(
+      reply(400, { message: 'Filtros inválidos' }),
+    );
+
+    expect(await run(['search', '--priority', 'urgente', '--token', 'abc'], {}, c.io, fetchFn)).toBe(1);
+    expect(c.err).toEqual(['Erro HTTP 400 - Filtros inválidos']);
+  });
+
+  it('retorna 1 quando não há token e a API responde 401', async () => {
+    const c = capture();
+    const fetchFn = jest.fn().mockResolvedValue(
+      reply(401, { message: 'Unauthorized' }),
+    );
+
+    expect(await run(['search'], { TODO_TOKEN: '' }, c.io, fetchFn)).toBe(1);
+    expect(fetchFn.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    expect(c.err).toEqual(['Erro HTTP 401 - Unauthorized']);
+  });
+});
+
+
 describe('run: list (listagem paginada e ordenada)', () => {
   const page = (items: unknown[], extra: Record<string, unknown> = {}) =>
     reply(200, { items, total: items.length, page: 1, limit: 5, totalPages: 1, ...extra });
@@ -445,9 +527,22 @@ describe('run: delete (exclusão por identificador)', () => {
   });
 });
 
-describe('run: ajuda lista os comandos da issue #9', () => {
-  it('menciona list, delete e as opções de paginação e ordenação', () => {
-    for (const text of ['list', 'delete', '--page', '--limit', '--sort', '--order']) {
+describe('run: ajuda lista os comandos das issues #9 e #10', () => {
+  it('menciona list, delete, search e suas opções', () => {
+    for (const text of [
+      'list',
+      'delete',
+      'search',
+      '--q',
+      '--category',
+      '--priority',
+      '--due-from',
+      '--due-to',
+      '--page',
+      '--limit',
+      '--sort',
+      '--order',
+    ]) {
       expect(USAGE).toContain(text);
     }
   });

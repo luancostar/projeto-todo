@@ -38,6 +38,9 @@ const VALUE_FLAGS = new Set([
   'category',
   'priority',
   'due-date',
+  'q',
+  'due-from',
+  'due-to',
   'page',
   'limit',
   'sort',
@@ -49,8 +52,7 @@ const FLAG_ALIASES: Record<string, string> = {
   p: 'password',
   i: 'id',
 };
-
-export const USAGE = `To-Do List CLI
+ export const USAGE = `To-Do List CLI
 
 Uso: cli <comando> [opções]
 
@@ -62,6 +64,7 @@ Comandos:
   create     Cadastra uma tarefa (POST /api/cli/records, exige token)
   update     Edita uma tarefa (PUT /api/cli/records/:id, exige token)
   list       Lista as tarefas com paginação e ordenação (GET /api/cli/records, exige token)
+  search     Busca tarefas com filtros combinados (GET /api/cli/records/search, exige token)
   delete     Exclui uma tarefa pelo ID (DELETE /api/cli/records/:id, exige token)
 
 Opções:
@@ -75,10 +78,13 @@ Opções:
   --category <categoria>   Categoria da tarefa
   --priority <prioridade>  Prioridade: baixa, media ou alta
   --due-date <data>        Data de vencimento (YYYY-MM-DD)
-  --page <n>               Página da listagem (padrão 1)
+  --q <texto>              Busca no título ou descrição
+  --due-from <data>        Prazo inicial (YYYY-MM-DD)
+  --due-to <data>          Prazo final (YYYY-MM-DD)
+  --page <n>               Página da consulta (padrão 1)
   --limit <n>              Tarefas por página, de 1 a 100 (padrão 5)
   --sort <campo>           Ordenação: id, title, category, priority, due_date ou created_at (padrão id)
-  --order <asc|desc>       Direção da ordenação (padrão desc)
+  --order <asc|desc>        Direção da ordenação (padrão desc)
   -h, --help               Mostra esta ajuda
 
 Códigos de saída: 0 sucesso, 1 erro na API ou na conexão, 2 uso incorreto.`;
@@ -293,6 +299,48 @@ export async function run(
         if (!result.ok) return reportHttpError(io, result);
 
         io.out(JSON.stringify(result.data));
+        return 0;
+      }
+
+            case 'search': {
+        const token = args.flags.token ?? env.TODO_TOKEN;
+        const headers: Record<string, string> = token
+          ? { Authorization: `Bearer ${token}` }
+          : {};
+
+        const query = new URLSearchParams();
+
+        const filters: Record<string, string> = {
+          q: 'q',
+          category: 'category',
+          priority: 'priority',
+          'due-from': 'due_from',
+          'due-to': 'due_to',
+          page: 'page',
+          limit: 'limit',
+          sort: 'sort',
+          order: 'order',
+        };
+
+        for (const [flag, param] of Object.entries(filters)) {
+          if (args.flags[flag] !== undefined) {
+            query.set(param, args.flags[flag]);
+          }
+        }
+
+        const queryString = query.toString();
+        const suffix = queryString ? `?${queryString}` : '';
+
+        const result = await callApi(
+          fetchFn,
+          'GET',
+          `${baseUrl}/api/cli/records/search${suffix}`,
+          headers,
+        );
+
+        if (!result.ok) return reportHttpError(io, result);
+
+        io.out(formatRecordList(result.data));
         return 0;
       }
 

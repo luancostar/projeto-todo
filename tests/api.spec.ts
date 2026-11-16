@@ -1253,6 +1253,178 @@ describe('CLI (issue #9): GET /api/cli/records (Listagem)', () => {
   });
 });
 
+
+describe('CLI (issue #10): GET /api/cli/records/search (Busca avançada)', () => {
+  let searchApp: INestApplication;
+  let searchDb: Db;
+  let cliToken: string;
+  let webToken: string;
+
+  const get = (query = '') =>
+    request(searchApp.getHttpServer())
+      .get(`/api/cli/records/search${query}`)
+      .set('Authorization', `Bearer ${cliToken}`);
+
+  const titles = (res: { body: { items: { title: string }[] } }) =>
+    res.body.items.map((item) => item.title).sort();
+
+  beforeAll(async () => {
+    jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    searchDb = new Db(':memory:');
+    searchDb.seedUser('admin', 'segredo123');
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule.register(searchDb, 'chave-da-busca-cli')],
+    }).compile();
+
+    searchApp = moduleRef.createNestApplication();
+    await searchApp.init();
+
+    const searchAuth = moduleRef.get(AuthService);
+    cliToken = searchAuth.sign('admin', 3600, 'cli');
+    webToken = searchAuth.sign('admin');
+
+    const seed: [string, string, string, string | null][] = [
+      ['Delta', 'Trabalho', 'alta', '2026-12-10'],
+      ['Alfa', 'Estudo', 'baixa', '2026-12-15'],
+      ['Charlie', 'Estudo', 'alta', '2026-12-01'],
+      ['Bravo', 'Geral', 'media', '2026-12-20'],
+      ['Echo', 'Estudo', 'alta', null],
+      ['Foxtrot', 'Trabalho', 'baixa', '2027-01-10'],
+    ];
+
+    for (const [title, category, priority, due_date] of seed) {
+      searchDb.createRecord(
+        {
+          title: `BuscaCLI ${title}`,
+          description: `Descrição ${title}`,
+          category,
+          priority,
+          due_date,
+        },
+        `seed-${title}`,
+        'cli',
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await searchApp.close();
+    searchDb.close();
+    jest.restoreAllMocks();
+  });
+
+  it('responde 401 sem token, com token inválido e com token da Web', async () => {
+    const server = searchApp.getHttpServer();
+
+    expect((await request(server).get('/api/cli/records/search')).status).toBe(401);
+
+    expect(
+      (
+        await request(server)
+          .get('/api/cli/records/search')
+          .set('Authorization', 'Bearer abc.def')
+      ).status,
+    ).toBe(401);
+
+    expect(
+      (
+        await request(server)
+          .get('/api/cli/records/search')
+          .set('Authorization', `Bearer ${webToken}`)
+      ).status,
+    ).toBe(401);
+  });
+
+  it('retorna todos os registros paginados sem filtros', async () => {
+    const res = await get('?limit=100');
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(6);
+    expect(res.body.items).toHaveLength(6);
+  });
+
+  it('filtra por texto, categoria e prioridade', async () => {
+    const res = await get('?q=BuscaCLI&category=Estudo&priority=alta');
+
+    expect(res.status).toBe(200);
+    expect(titles(res)).toEqual(['BuscaCLI Charlie', 'BuscaCLI Echo']);
+    expect(res.body.total).toBe(2);
+  });
+
+  it('combina filtros de prazo e texto', async () => {
+    const res = await get(
+      '?q=BuscaCLI&due_from=2026-12-01&due_to=2026-12-31',
+    );
+
+    expect(res.status).toBe(200);
+    expect(titles(res)).toEqual([
+      'BuscaCLI Alfa',
+      'BuscaCLI Bravo',
+      'BuscaCLI Charlie',
+      'BuscaCLI Delta',
+    ]);
+    expect(res.body.total).toBe(4);
+  });
+
+  it('aplica paginação e ordenação', async () => {
+    const res = await get('?q=BuscaCLI&sort=title&order=asc&page=2&limit=2');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      total: 6,
+      page: 2,
+      limit: 2,
+      totalPages: 3,
+    });
+    expect(titles(res)).toEqual(['BuscaCLI Charlie', 'BuscaCLI Delta']);
+  });
+
+  it('responde 400 para filtros inválidos e registra log da CLI', async () => {
+    const res = await get('?priority=urgente');
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Filtros inválidos');
+    expect(res.body.errors).toBeDefined();
+
+    expect(
+      logs().find((l) => l.layer === 'api' && l.operation === 'search_records'),
+    ).toMatchObject({
+      level: 'WARN',
+      status: 'error',
+      client: 'cli',
+    });
+  });
+
+  it('correlaciona os logs da API e do banco com o mesmo request_id', async () => {
+    const res = await get('?q=BuscaCLI&priority=alta');
+    const requestId = res.headers['x-request-id'];
+
+    const apiLog = logs().find(
+      (l) => l.layer === 'api' && l.operation === 'search_records',
+    );
+    const dbLog = logs().find(
+      (l) => l.layer === 'db' && l.operation === 'search_records',
+    );
+
+    expect(apiLog).toMatchObject({
+      level: 'INFO',
+      status: 'success',
+      client: 'cli',
+      request_id: requestId,
+    });
+
+    expect(dbLog).toMatchObject({
+      level: 'INFO',
+      status: 'success',
+      client: 'cli',
+      request_id: requestId,
+    });
+  });
+});
+
+
 describe('CLI (issue #9): DELETE /api/cli/records/:id (Exclusão)', () => {
   const cliToken = () => auth.sign('admin', 3600, 'cli');
   const create = async (title: string): Promise<number> => {

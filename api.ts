@@ -713,6 +713,54 @@ export class CliController {
     return result;
   }
 
+    /** Issue #10: busca avançada via CLI. */
+  @Get('records/search')
+  @UseGuards(CliAuthGuard)
+  searchRecords(
+    @Query() query: Record<string, unknown>,
+    @Req() req: WebRequest,
+  ): PaginatedRecords {
+    const validation = validateSearchFilters(query);
+
+    if (!validation.valid) {
+      apiLog(
+        req.requestId,
+        'WARN',
+        'search_records',
+        'error',
+        'Filtros de busca inválidos',
+        'cli',
+      );
+      throw new BadRequestException({
+        message: 'Filtros inválidos',
+        errors: validation.errors,
+      });
+    }
+
+    const result = this.db.searchRecords(
+      validation.filters,
+      {
+        page: Number(query.page),
+        limit: Number(query.limit),
+        sort: typeof query.sort === 'string' ? query.sort : undefined,
+        order: typeof query.order === 'string' ? query.order : undefined,
+      },
+      req.requestId,
+      'cli',
+    );
+
+    apiLog(
+      req.requestId,
+      'INFO',
+      'search_records',
+      'success',
+      `Busca retornou ${result.items.length} registro(s) de ${result.total}`,
+      'cli',
+    );
+
+    return result;
+  }
+
   /** Issue #9: exclusão por identificador via CLI (DELETE /api/cli/records/{id}). */
   @Delete('records/:id')
   @HttpCode(HttpStatus.OK)
