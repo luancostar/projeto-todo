@@ -58,6 +58,18 @@ export interface DashboardStats {
   byCategory: { category: string; count: number }[];
 }
 
+/** Indicadores do dashboard da CLI (issue #12): exatamente o mesmo formato do dashboard Web. */
+export type CliDashboardStats = DashboardStats;
+
+/** Data de hoje no fuso local do servidor, no formato AAAA-MM-DD (a mesma regra do dashboard Web). */
+export function localDateString(now: Date = new Date()): string {
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
 export interface PaginatedRecords {
   items: RecordRow[];
   total: number;
@@ -593,6 +605,47 @@ export class Db {
     });
 
     return stats;
+  }
+
+  /**
+   * Issue #12: indicadores do dashboard para a CLI. Consulta própria (não reaproveita a da Web), mas
+   * com as mesmas regras, para os valores serem iguais aos do dashboard Web:
+   * 1. prazo: "atrasada" = prazo anterior a hoje (data local do servidor, AAAA-MM-DD); o resto, inclusive tarefas sem prazo, está "em dia";
+   * 2. prioridade: baixa, media e alta;
+   * 3. categoria: contagem por categoria, da maior para a menor (empate em ordem alfabética).
+   */
+  getCliDashboardStats(requestId: string, today: string = localDateString()): CliDashboardStats {
+    const { total, overdue } = this.conn
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN due_date IS NOT NULL AND due_date < ? THEN 1 ELSE 0 END), 0) AS overdue
+         FROM records`,
+      )
+      .get(today) as { total: number; overdue: number };
+
+    const byPriority = { baixa: 0, media: 0, alta: 0 };
+    const priorityRows = this.conn
+      .prepare('SELECT priority, COUNT(*) AS count FROM records GROUP BY priority')
+      .all() as { priority: string; count: number }[];
+    for (const row of priorityRows) {
+      if (row.priority in byPriority) byPriority[row.priority as keyof typeof byPriority] = row.count;
+    }
+
+    const byCategory = this.conn
+      .prepare('SELECT category, COUNT(*) AS count FROM records GROUP BY category ORDER BY count DESC, category ASC')
+      .all() as { category: string; count: number }[];
+
+    logEvent({
+      level: 'INFO',
+      layer: 'db',
+      client: 'cli',
+      operation: 'dashboard_cli_stats',
+      status: 'success',
+      request_id: requestId,
+      message: `Indicadores calculados para ${total} tarefa(s)`,
+    });
+
+    return { total, byStatus: { em_dia: total - overdue, atrasada: overdue }, byPriority, byCategory };
   }
 
   close(): void {

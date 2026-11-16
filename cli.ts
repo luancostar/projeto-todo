@@ -66,6 +66,7 @@ Comandos:
   list       Lista as tarefas com paginação e ordenação (GET /api/cli/records, exige token)
   search     Busca tarefas com filtros combinados (GET /api/cli/records/search, exige token)
   delete     Exclui uma tarefa pelo ID (DELETE /api/cli/records/:id, exige token)
+  dashboard  Mostra os 3 indicadores do dashboard em texto (GET /api/cli/dashboard, exige token)
 
 Opções:
   --api-url <url>          Endereço da API (env API_URL, padrão ${DEFAULT_API_URL})
@@ -154,6 +155,41 @@ function reportHttpError(io: CliIo, result: ApiResult): number {
   const reasons = Array.isArray(result.data.errors) ? `: ${result.data.errors.join('; ')}` : '';
   io.err(`Erro HTTP ${result.status}${detail}${reasons}`);
   return 1;
+}
+
+interface DashboardData {
+  total: number;
+  byStatus: { em_dia: number; atrasada: number };
+  byPriority: { baixa: number; media: number; alta: number };
+  byCategory: { category: string; count: number }[];
+}
+
+/** Monta o texto dos 3 indicadores, com os mesmos rótulos, ordem e arredondamento do dashboard Web. */
+function formatDashboard(data: DashboardData): string {
+  const { total } = data;
+  const percent = (count: number) => (total > 0 ? Math.round((count / total) * 100) : 0);
+  const group = (title: string, rows: [string, number][]): string[] => {
+    const width = Math.max(0, ...rows.map(([label]) => label.length));
+    const lines = rows.map(([label, count]) => `   ${label.padEnd(width)}  ${count} (${percent(count)}%)`);
+    return [title, ...(lines.length > 0 ? lines : ['   (nenhuma categoria)'])];
+  };
+
+  return [
+    `Indicadores (${total} ${total === 1 ? 'tarefa' : 'tarefas'})`,
+    '',
+    ...group('1. Cumprimento de prazo', [
+      ['Em dia / No prazo', data.byStatus.em_dia],
+      ['Atrasadas', data.byStatus.atrasada],
+    ]),
+    '',
+    ...group('2. Por prioridade', [
+      ['Alta', data.byPriority.alta],
+      ['Média', data.byPriority.media],
+      ['Baixa', data.byPriority.baixa],
+    ]),
+    '',
+    ...group('3. Por categoria', data.byCategory.map((c): [string, number] => [c.category, c.count])),
+  ].join('\n');
 }
 
 interface ListedRecord {
@@ -379,6 +415,18 @@ export async function run(
         if (!result.ok) return reportHttpError(io, result);
 
         io.out(`Tarefa #${id} excluída com sucesso.`);
+        return 0;
+      }
+
+      case 'dashboard': {
+        const token = args.flags.token ?? env.TODO_TOKEN;
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const result = await callApi(fetchFn, 'GET', `${baseUrl}/api/cli/dashboard`, headers);
+
+        if (!result.ok) return reportHttpError(io, result);
+
+        io.out(formatDashboard(result.data as unknown as DashboardData));
         return 0;
       }
 

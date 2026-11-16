@@ -11,7 +11,7 @@ Projeto da avaliação prática de Git e GitHub. Lista de tarefas com Web (React
 | `index.html` | Toda a Web (HTML, CSS e React via CDN embutidos): login, cadastro/edição, tabela, busca avançada e exportação CSV |
 | `api.ts` | API NestJS: endpoints, autenticação e logs da API |
 | `db.ts` | Acesso ao SQLite e logs da camada de banco |
-| `cli.ts` | CLI: fala só com a API (`/api/cli/*`), nunca com o banco (issues #7, #8 e #9) |
+| `cli.ts` | CLI: fala só com a API (`/api/cli/*`), nunca com o banco (issues #7, #8, #9, #10 e #12) |
 | `README.md` | Execução e documentação de cada issue |
 
 ---
@@ -624,6 +624,79 @@ A consulta ao dashboard gera logs estruturados no padrão JSON em stdout com cor
 {"timestamp":"2026-11-16T01:00:00.000Z","level":"INFO","layer":"db","client":"web","operation":"dashboard_stats","status":"success","request_id":"c6f3e1b0-...","message":"Estatísticas do dashboard recuperadas com sucesso"}
 {"timestamp":"2026-11-16T01:00:00.005Z","level":"INFO","layer":"api","client":"web","operation":"dashboard_stats","status":"success","request_id":"c6f3e1b0-...","message":"Dashboard carregado com 5 registros"}
 ```
+
+---
+
+## Issue #12: Indicadores pela CLI
+
+O comando `dashboard` da CLI mostra em texto os **mesmos 3 indicadores e valores** do dashboard Web (Issue #6). Como todos os comandos, ele só fala com a API, no endpoint próprio `/api/cli/dashboard`; a CLI **nunca** acessa o banco.
+
+### Como usar
+
+O comando exige o token da CLI, pela opção `--token` ou pela variável `TODO_TOKEN` (veja a seção da Issue #7).
+
+```bash
+# obtém o token e guarda em TODO_TOKEN (Linux / macOS / Git Bash; no PowerShell use $env:TODO_TOKEN = ...)
+export TODO_TOKEN=$(docker compose run --rm -T cli token)
+
+# mostra os 3 indicadores
+docker compose run --rm cli dashboard
+```
+
+Exemplo de saída:
+
+```text
+Indicadores (7 tarefas)
+
+1. Cumprimento de prazo
+   Em dia / No prazo  5 (71%)
+   Atrasadas          2 (29%)
+
+2. Por prioridade
+   Alta   4 (57%)
+   Média  1 (14%)
+   Baixa  2 (29%)
+
+3. Por categoria
+   Estudo    2 (29%)
+   Trabalho  2 (29%)
+   Geral     1 (14%)
+   Pessoal   1 (14%)
+   Projetos  1 (14%)
+```
+
+### Os 3 indicadores
+
+Os rótulos, a ordem e o arredondamento dos percentuais (`Math.round`, 0% quando não há tarefas) são os mesmos do dashboard Web:
+
+1. **Cumprimento de prazo:** *Atrasadas* são as tarefas com prazo anterior à data de hoje (fuso local do servidor); todas as outras, inclusive as sem prazo e as que vencem hoje, estão *Em dia / No prazo*.
+2. **Por prioridade:** quantidade de tarefas **Alta**, **Média** e **Baixa**.
+3. **Por categoria:** quantidade por categoria, da maior para a menor contagem (empate em ordem alfabética). Sem tarefas, aparece `(nenhuma categoria)`.
+
+O cabeçalho mostra o total (`1 tarefa` ou `N tarefas`). Códigos de saída: `0` sucesso; `1` erro da API (por exemplo, 401 sem token válido) ou de conexão.
+
+### Endpoint da Issue #12
+
+| Método | Rota | Autenticação | Resposta |
+|---|---|---|---|
+| GET | `/api/cli/dashboard` | Bearer token da CLI | 200 `{ total, byStatus: { em_dia, atrasada }, byPriority: { baixa, media, alta }, byCategory: [{ category, count }] }` (o mesmo formato de `GET /api/web/dashboard`); 401 sem token válido |
+
+O endpoint e a consulta SQL (`Db.getCliDashboardStats`) são próprios da CLI; o token da Web não vale nessa rota. Como as regras são as mesmas do dashboard Web, os valores são idênticos para os mesmos dados (há teste comparando as duas respostas).
+
+### Logs da Issue #12
+
+Cada chamada gera uma linha na camada `api` e outra na camada `db`, com o **mesmo `request_id`** e `"client":"cli"`. Tokens nunca são registrados.
+
+```bash
+docker compose logs --no-log-prefix app | grep -E '"operation":"(dashboard_stats|dashboard_cli_stats)"' | grep '"client":"cli"'
+```
+
+```json
+{"timestamp":"2026-11-16T05:00:00.000Z","level":"INFO","layer":"db","client":"cli","operation":"dashboard_cli_stats","status":"success","request_id":"4d2a...","message":"Indicadores calculados para 7 tarefa(s)"}
+{"timestamp":"2026-11-16T05:00:00.001Z","level":"INFO","layer":"api","client":"cli","operation":"dashboard_stats","status":"success","request_id":"4d2a...","message":"Indicadores retornados para 7 tarefa(s)"}
+```
+
+Sem token válido a API registra um `WARN` (`authenticate`) e responde 401.
 
 ---
 

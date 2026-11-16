@@ -32,6 +32,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  CliDashboardStats,
   Db,
   LogEvent,
   logEvent,
@@ -801,6 +802,17 @@ export class CliController {
     apiLog(req.requestId, 'INFO', 'delete_record', 'success', `Registro ${id} excluído com sucesso`, 'cli');
 
     return { message: 'Registro excluído com sucesso', id };
+  }
+
+  /** Issue #12: indicadores do dashboard via CLI (GET /api/cli/dashboard), com consulta própria da CLI. */
+  @Get('dashboard')
+  @UseGuards(CliAuthGuard)
+  dashboard(@Req() req: WebRequest): CliDashboardStats {
+    const stats = this.db.getCliDashboardStats(req.requestId);
+
+    apiLog(req.requestId, 'INFO', 'dashboard_stats', 'success', `Indicadores retornados para ${stats.total} tarefa(s)`, 'cli');
+
+    return stats;
   }
 }
 
